@@ -1,0 +1,84 @@
+function [scope_out, display_out, error_flag] = Decoder(bus_signal, my_id)
+    persistent state bit_count addr_buffer result mat_a mat_b err_flag;
+    
+    if isempty(state)
+        state       = int32(0);
+        bit_count   = int32(0);
+        addr_buffer = zeros(1,8);
+        result      = double(0);
+        mat_a       = zeros(1,8);
+        mat_b       = zeros(1,8);
+        err_flag    = double(0);  % <-- persistent error flag
+    end
+    
+    is_high = double(bus_signal == 5);
+    
+    scope_out  = double(0);
+
+    switch state
+
+        case 0
+            if is_high
+                state     = int32(1);
+                bit_count = int32(0);
+            end
+            
+        case 1
+            bit_count = bit_count + int32(1);
+            if bit_count >= int32(10)
+                state       = int32(2);
+                bit_count   = int32(0);
+                addr_buffer = zeros(1,8);
+            end
+            
+        case 2
+            bit_count = bit_count + int32(1);
+            idx = double(bit_count);
+            if idx <= 8
+                addr_buffer(idx) = is_high;
+            end
+            if bit_count == int32(8)
+                received_id = sum(addr_buffer .* 2.^(7:-1:0));
+                if received_id == double(my_id)
+                    state     = int32(3);
+                    bit_count = int32(0);
+                    mat_a     = zeros(1,8);
+                    mat_b     = zeros(1,8);
+                else
+                    state = int32(0);
+                end
+            end
+            
+        case 3
+            bit_count = bit_count + int32(1);
+            scope_out = double(bus_signal);
+            
+            data_pos = double(bit_count) - 21.0;
+            
+            if data_pos >= 1.0 && data_pos <= 16.0
+                pair_index = ceil(data_pos / 2.0);
+                if mod(data_pos, 2.0) == 1.0
+                    mat_a(pair_index) = is_high;
+                else
+                    mat_b(pair_index) = is_high;
+                end
+            end
+            
+            if bit_count >= int32(61)
+                if all(mat_a == mat_b)
+                    % No noise
+                    result   = double(sum(mat_a .* 2.^(7:-1:0)));
+                    err_flag = double(0);  % <-- clear flag on clean data
+                else
+                    % Noise detected
+                    result   = double(0);
+                    err_flag = double(1);  % <-- set flag on noise
+                end
+                state = int32(0);
+            end
+    end
+
+    % Outputs reflect persistent values
+    display_out = result;
+    error_flag  = err_flag;  % <-- holds value between time steps
+end

@@ -1,0 +1,54 @@
+function signal = Encoder(data_in, address_in, priority_in, noise_sw)
+    % Persistent variables to maintain frame state across time steps
+    persistent full_frame frame_index;
+    
+    % Initialization: Packages the inputs into the protocol frame
+    if isempty(frame_index)
+        frame_index = 1;
+        
+        % 1. Binary Conversion (8-bit width)
+        data_bits = bitget(uint8(data_in), 8:-1:1);
+        addr_bits = bitget(uint8(address_in), 8:-1:1);
+        prio_bits = bitget(uint8(priority_in), 8:-1:1);
+        
+        % 2. 16-bit Payload (Double Data Logic)
+        payload = reshape([data_bits; data_bits], 1, []);
+        
+        % --- NOISE INJECTION BLOCK ---
+        % Agar noise_sw == 1, toh payload ke random bits flip honge
+        if noise_sw == 1
+            % Do random positions select karein noise ke liye
+            noise_idx = randi([1, 16], 1, 2); 
+            for i = noise_idx
+                payload(i) = ~payload(i); % 0 ko 1 aur 1 ko 0 kar dena
+            end
+        end
+        % -----------------------------
+        
+        % 3. Assemble Frame with 0-Logic Delimiters
+        header = [1, 0]; % Start (5V) and Gap (0V)
+        prio_block = [double(prio_bits), 0]; % 8-bit Prio + Delim
+        addr_block = [double(addr_bits), 0]; % 8-bit Addr + Delim
+        data_start_gap = zeros(1, 20); % 20-bit Lead Gap
+        data_block = double(payload); % Noise-affected or clean payload
+        data_end_gap = zeros(1, 20); % 20-bit Tail Gap
+        tail = [0, 1, 0, 0]; % ACK and Stop Bits
+        
+        % 4. Final Logic Sequence
+        logic_sequence = [header, prio_block, addr_block, data_start_gap, data_block, data_end_gap, tail];
+        
+        % 5. Physical Voltage Conversion (+5V for Logic 1)
+        full_frame = logic_sequence * 5; 
+    end
+    
+    % Output exactly one voltage level per simulation time step (0.05s)
+    signal = full_frame(frame_index);
+    
+    % Sequential index management
+    if frame_index < length(full_frame)
+        frame_index = frame_index + 1;
+    else
+        % Reset logic to allow continuous looping on the Scope
+        frame_index = 1; 
+    end
+end
